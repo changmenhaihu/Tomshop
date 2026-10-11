@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+  自定义 ResultMap 示例一：多对一关联（平铺写法）
+
+  业务场景：商品 SPU 详情需要带出所属分类名称。
+  映射说明：
+    * autoMapping="true" —— 让 MyBatis 自动把 s.* 中与目标属性同名的列（经下划线转驼峰）
+      映射到 SpuDetailVO（继承 ProductSpu）的字段，省去逐个手写。
+    * <result column="category_name" property="categoryName"/> —— 显式映射关联列。
+      该列来自 product_category.name，列名与属性名靠驼峰规则其实也能自动映射，
+      但显式书写让「这个字段来自关联表」的意图一目了然，且当列名无法被驼峰规则
+      推导时（例如 SELECT c.name AS cateName）就必须显式写。
+
+  若需要把分类映射成完整嵌套对象（而非平铺 categoryName），可改为：
+    <association property="category" javaType="com.tom.tomshop.entity.ProductCategory">
+        <id column="category_id" property="id"/>
+        <result column="category_name" property="name"/>
+    </association>
+-->
+<mapper namespace="com.tom.tomshop.mapper.ProductSpuMapper">
+
+    <resultMap id="SpuDetailMap" type="com.tom.tomshop.vo.SpuDetailVO" autoMapping="true">
+        <result column="category_name" property="categoryName"/>
+    </resultMap>
+
+    <select id="selectSpuDetail" resultMap="SpuDetailMap">
+        SELECT s.*,
+               c.name AS category_name
+        FROM product_spu s
+                 LEFT JOIN product_category c ON s.category_id = c.id
+        WHERE s.id = #{spuId}
+          AND s.deleted = 0
+    </select>
+
+</mapper>

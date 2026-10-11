@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+  自定义 ResultMap 示例二：一对多关联（collection 写法）
+
+  业务场景：订单详情需要带出该订单的所有明细行。
+
+  关键陷阱（务必理解）：
+    订单表 order_info 与明细表 order_item 存在大量同名列（id、order_no、total_amount、
+    create_time 等）。LEFT JOIN 一条 SQL 拉出后，若两表列同名，MyBatis 无法区分
+    「这个 id 是订单的还是明细的」。因此：
+      * 订单侧字段用 o.* + autoMapping 自动映射到 OrderDetailVO（继承 OrderInfo）；
+      * 明细侧字段全部显式加 item_ 前缀别名，并在 <collection> 内逐列映射，
+        避免与订单列冲突。
+
+  若明细还需要审计字段（create_time / update_time / deleted / version），
+  同样给 oi.create_time 等加别名并在 collection 内补 <result> 即可，
+  本例为聚焦业务语义只映射了明细的核心业务字段。
+-->
+<mapper namespace="com.tom.tomshop.mapper.OrderInfoMapper">
+
+    <resultMap id="OrderDetailMap" type="com.tom.tomshop.vo.OrderDetailVO" autoMapping="true">
+        <!-- 显式声明主键列，MyBatis 据此做结果去重（一对多场景必须有 id 列，否则多条明细会重复合并） -->
+        <id column="id" property="id"/>
+        <collection property="items" ofType="com.tom.tomshop.entity.OrderItem">
+            <id column="item_id" property="id"/>
+            <result column="item_order_id" property="orderId"/>
+            <result column="item_order_no" property="orderNo"/>
+            <result column="spu_id" property="spuId"/>
+            <result column="sku_id" property="skuId"/>
+            <result column="spu_name" property="spuName"/>
+            <result column="sku_name" property="skuName"/>
+            <result column="sku_spec" property="skuSpec"/>
+            <result column="product_image" property="productImage"/>
+            <result column="price" property="price"/>
+            <result column="quantity" property="quantity"/>
+            <result column="item_total_amount" property="totalAmount"/>
+        </collection>
+    </resultMap>
+
+    <select id="selectOrderDetail" resultMap="OrderDetailMap">
+        SELECT o.*,
+               oi.id            AS item_id,
+               oi.order_id      AS item_order_id,
+               oi.order_no      AS item_order_no,
+               oi.spu_id        AS spu_id,
+               oi.sku_id        AS sku_id,
+               oi.spu_name      AS spu_name,
+               oi.sku_name      AS sku_name,
+               oi.sku_spec      AS sku_spec,
+               oi.product_image AS product_image,
+               oi.price         AS price,
+               oi.quantity      AS quantity,
+               oi.total_amount  AS item_total_amount
+        FROM order_info o
+                 LEFT JOIN order_item oi ON o.id = oi.order_id
+        WHERE o.id = #{orderId}
+          AND o.deleted = 0
+    </select>
+
+</mapper>

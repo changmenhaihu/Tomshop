@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Logback 配置
+
+  设计要点：
+    * 使用 logback-spring.xml 而非 logback.xml，才能使用 <springProfile> 做环境区分
+    * 文件输出走 AsyncAppender，避免磁盘 IO 阻塞业务线程
+    * 按天 + 按大小滚动，maxHistory 30 天，totalSizeCap 5GB 兜底防止磁盘打满
+    * 日志目录可用环境变量 LOG_HOME 覆盖（容器部署时挂载到数据盘）
+-->
+<configuration scan="true" scanPeriod="60 seconds">
+
+    <springProperty scope="context" name="APP_NAME" source="spring.application.name" defaultValue="tomshop"/>
+    <property name="LOG_HOME" value="${LOG_HOME:-./logs}"/>
+
+    <!--
+      日志格式说明：
+        %X{traceId}——阶段 3 引入链路追踪后，由过滤器写入 MDC；当前无值时输出占位符 "-"，
+        这样格式在引入前后保持一致，便于日志平台解析规则一次性配置到位。
+        %X{userId}——同上，阶段 3 起记录操作人，便于排查「是谁触发的这次请求」
+    -->
+    <property name="CONSOLE_PATTERN"
+              value="%d{yyyy-MM-dd HH:mm:ss.SSS} %highlight(%-5level) [%thread] [%X{traceId:--}] [%X{userId:--}] %cyan(%logger{40}) - %msg%n"/>
+    <property name="FILE_PATTERN"
+              value="%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] [%X{traceId:--}] [%X{userId:--}] %logger{50} - %msg%n"/>
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${CONSOLE_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_HOME}/${APP_NAME}.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_HOME}/history/${APP_NAME}.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>100MB</maxFileSize>
+            <maxHistory>30</maxHistory>
+            <totalSizeCap>5GB</totalSizeCap>
+            <cleanHistoryOnStart>false</cleanHistoryOnStart>
+        </rollingPolicy>
+        <encoder>
+            <pattern>${FILE_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!--
+      AsyncAppender 关键参数：
+        queueSize=1024    队列容量。过小在突发流量下频繁丢弃，过大则停机时排空耗时
+        discardingThreshold=0  队列满时不丢弃任何事件（默认会丢弃 INFO 及以下，导致事故现场日志缺失）
+        配合 neverBlock=false：允许短暂阻塞业务线程，换取「日志不丢」——本项目的选择依据是
+        电商订单链路一旦出事，日志是唯一的事后凭据，宁可轻微影响延迟也不能丢
+    -->
+    <appender name="ASYNC_FILE" class="ch.qos.logback.classic.AsyncAppender">
+        <queueSize>1024</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+        <neverBlock>false</neverBlock>
+        <includeCallerData>false</includeCallerData>
+        <appender-ref ref="FILE"/>
+    </appender>
+
+    <!-- 框架噪音降噪：这些 logger 在 DEBUG 下会输出大量无用内容 -->
+    <logger name="org.apache.ibatis" level="INFO"/>
+    <logger name="com.zaxxer.hikari" level="INFO"/>
+    <logger name="org.springframework.web" level="INFO"/>
+    <logger name="org.springframework.boot.actuate" level="WARN"/>
+    <logger name="io.lettuce" level="INFO"/>
+
+    <!-- 开发环境：控制台 + 文件，业务包 DEBUG 打 SQL -->
+    <springProfile name="dev">
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="ASYNC_FILE"/>
+        </root>
+        <logger name="com.tom.tomshop" level="DEBUG"/>
+    </springProfile>
+
+    <!-- 测试 / 生产：仅文件，业务包 INFO -->
+    <springProfile name="test,prod">
+        <root level="INFO">
+            <appender-ref ref="ASYNC_FILE"/>
+        </root>
+        <logger name="com.tom.tomshop" level="INFO"/>
+    </springProfile>
+
+    <!-- 未指定 profile 时的兜底，保证任何启动方式都有日志输出 -->
+    <springProfile name="default">
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
+
+</configuration>

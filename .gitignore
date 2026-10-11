@@ -1,0 +1,37 @@
+# ---------- 构建产物 ----------
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+# ---------- 日志 ----------
+logs/
+*.log
+*.log.gz
+
+# ---------- IDE ----------
+.idea/
+*.iws
+*.iml
+*.ipr
+.vscode/
+.settings/
+.project
+.classpath
+.factorypath
+nbproject/private/
+
+# ---------- 操作系统 ----------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------- Spring Boot ----------
+HELP.md
+spring-shell.log
+
+# ---------- 本地敏感配置（覆盖本地连接串时使用） ----------
+src/main/resources/application-local.yml
+src/main/resources/application-local.properties
+src/main/resources/application-dev.yml
+src/main/resources/application-dev.properties

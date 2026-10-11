@@ -1,0 +1,149 @@
+# ==========================================================================
+# TomShop 主配置
+#
+# 分层策略：
+#   application.yml        仅放与环境无关的通用配置
+#   application-{env}.yml  放环境相关的连接串、凭据（通过环境变量注入，不硬编码）
+#
+# 敏感配置原则：密码、密钥一律写成 ${ENV_VAR:本地默认值} 形式。
+# 冒号后的默认值仅为降低本地开发门槛，生产环境必须由环境变量或配置中心覆盖。
+# ==========================================================================
+server:
+  port: 8080
+  # 优雅停机：等待正在处理的请求完成，避免发布时订单请求被硬切断
+  shutdown: graceful
+  tomcat:
+    threads:
+      max: 200
+      min-spare: 20
+    accept-count: 200
+    max-connections: 8192
+  error:
+    # 异常统一由 GlobalExceptionHandler 处理，关闭 Boot 默认错误页/错误属性，避免泄露堆栈
+    include-stacktrace: never
+    include-message: never
+
+spring:
+  application:
+    name: tomshop
+  profiles:
+    active: dev
+  lifecycle:
+    # 与 server.shutdown=graceful 配套：给正在执行的请求留出收尾时间
+    timeout-per-shutdown-phase: 30s
+  mvc:
+    # 关闭静态资源映射，本项目为纯 API 服务，避免与 Controller 路由产生歧义
+    throw-exception-if-no-handler-found: false
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 20MB
+  # 序列化规则统一由 com.tom.tomshop.config.JacksonConfig 管理（内含雪花 ID 精度保护），
+  # 此处仅声明 Boot 原生开关作为兜底，冲突时以 JacksonConfig 为准
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: GMT+8
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      pool-name: TomShopHikariPool
+      minimum-idle: 5
+      maximum-pool-size: 20
+      # 刻意设为 5s（而非默认 30s）：该值同时是「数据库宕机时健康检查接口的最坏耗时」，
+      # 30s 会让探活请求长时间挂起，进而导致容器探针超时误判
+      connection-timeout: 5000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      connection-test-query: SELECT 1
+  data:
+    redis:
+      # 单节点配置。阶段 4 引入 Redisson 后，分布式锁走 Redisson 独立配置，
+      # 这里的 Lettuce 连接池继续服务普通缓存读写
+      lettuce:
+        pool:
+          max-active: 16
+          max-idle: 8
+          min-idle: 2
+          max-wait: 3000ms
+          time-between-eviction-runs: 60s
+      timeout: 3000ms
+      connect-timeout: 3000ms
+
+# ==========================================================================
+# MyBatis-Plus
+# ==========================================================================
+mybatis-plus:
+  # 自定义 ResultMap 的 XML 放在此处（阶段 1 的多表关联查询）
+  mapper-locations: classpath*:/mapper/**/*.xml
+  type-aliases-package: com.tom.tomshop.entity
+  configuration:
+    # 开启下划线转驼峰：create_time -> createTime
+    map-underscore-to-camel-case: true
+    # 关闭二级缓存：MyBatis 二级缓存基于命名空间，跨命名空间的写操作不会互相失效，
+    # 在订单/库存这类强一致场景下是事故源。缓存统一由阶段 4 的 Caffeine + Redis 承担
+    cache-enabled: false
+    # 返回 Map 时值为 null 的字段也要保留 key，避免前端取值时 undefined
+    call-setters-on-nulls: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+  global-config:
+    banner: false
+    db-config:
+      id-type: assign_id
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+      # 更新时忽略 null 字段，避免「只想改一个字段却把其他列置空」
+      update-strategy: not_null
+      insert-strategy: not_null
+
+# ==========================================================================
+# 接口文档（Knife4j / OpenAPI 3）
+# ==========================================================================
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+  default-produces-media-type: application/json
+
+knife4j:
+  enable: true
+  setting:
+    language: zh_cn
+    enable-footer: false
+    enable-open-api: false
+    enable-swagger-models: true
+    swagger-model-name: 数据模型
+
+# ==========================================================================
+# 应用自定义配置（绑定到 TomShopProperties）
+# ==========================================================================
+tomshop:
+  application-version: 1.0.0-SNAPSHOT
+  cors:
+    # 生产环境（application-prod.yml）必须覆盖为真实域名白名单
+    allowed-origins:
+      - "*"
+    allow-credentials: true
+    max-age: 3600
+
+# ==========================================================================
+# Actuator：仅暴露探活与信息端点，其余端点（env、beans、heapdump 等）默认关闭
+# 注意：Actuator 的 /actuator/health 与业务接口 /api/v1/health 用途不同——
+#       前者供 K8s 探针，后者供业务运维面板，两者互不替代
+# ==========================================================================
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when_authorized
+      probes:
+        enabled: true
+  health:
+    redis:
+      enabled: true
+    db:
+      enabled: true
