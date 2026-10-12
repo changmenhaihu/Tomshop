@@ -48,7 +48,7 @@
           与 Spring Boot 3.3.x（Spring Framework 6.1.x）搭配存在 NoSuchMethodError 风险。
           此处显式提升到 2.6.0（最近优先原则生效），避免阶段 0 就卡在文档页 404 / 启动报错。
         -->
-        <springdoc.version>2.6.0</springdoc.version>
+        <springdoc.version>2.3.0</springdoc.version>
         <commons-collections4.version>4.4</commons-collections4.version>
         <commons-io.version>2.16.1</commons-io.version>
     </properties>
@@ -133,17 +133,18 @@
         </dependency>
 
         <!-- ==================== 接口文档：Knife4j（OpenAPI 3 + Jakarta） ==================== -->
-        <dependency>
-            <groupId>com.github.xiaoymin</groupId>
-            <artifactId>knife4j-openapi3-jakarta-spring-boot-starter</artifactId>
-            <version>${knife4j.version}</version>
-        </dependency>
-        <!-- 显式覆盖 knife4j 传递的 springdoc 版本，见 properties 中的说明 -->
-        <dependency>
-            <groupId>org.springdoc</groupId>
-            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
-            <version>${springdoc.version}</version>
-        </dependency>
+        <!-- SpringDoc OpenAPI3 核心依赖（SpringBoot3专用） -->
+<dependency>
+    <groupId>org.springdoc</groupId>
+    <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+    <version>2.3.0</version>
+</dependency>
+<!-- Knife4j 4.x适配SpringBoot3 -->
+<dependency>
+    <groupId>com.github.xiaoymin</groupId>
+    <artifactId>knife4j-openapi3-jakarta-spring-boot-starter</artifactId>
+    <version>4.5.0</version>
+</dependency>
 
         <!-- ==================== 测试 ==================== -->
         <dependency>
