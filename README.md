@@ -2,7 +2,7 @@
 
 前后端分离 B2C 电商单体后端。
 
-> **当前进度：阶段 0（项目初始化与基础骨架）已完成** —— 详见文末「开发进度」。
+> **当前进度：阶段 0、阶段 1 已完成，阶段 1 后追加了一次鉴权域重构（菜单/权限解耦）** —— 详见文末「开发进度」。
 
 ---
 
@@ -40,11 +40,29 @@
 
 ```bash
 MYSQL="C:/Program Files/MySQL/MySQL Server 8.0/bin/mysql.exe"
-# 建库 + 建表（12 张）
+# 建库 + 建表（14 张）
 "$MYSQL" -h 127.0.0.1 -u root -p --default-character-set=utf8mb4 < src/main/resources/db/schema.sql
-# 初始化数据（角色/权限/分类/示例商品）
+# 初始化数据（角色/菜单/权限/分类/示例商品）
 "$MYSQL" -h 127.0.0.1 -u root -p --default-character-set=utf8mb4 tomshop < src/main/resources/db/data.sql
 ```
+
+### 已有库的增量迁移
+
+`schema.sql` / `data.sql` 是**全量重建**脚本，只适用于全新环境 —— 它们以 `DROP TABLE` 开头，
+在已有真实数据的库上执行会清空业务数据。已经跑起来的库改用 `db/migration/` 下的增量脚本：
+
+```bash
+"$MYSQL" -h 127.0.0.1 -u root -p --default-character-set=utf8mb4 tomshop \
+  < src/main/resources/db/migration/2026-10-13__split_menu_permission.sql
+```
+
+| 迁移脚本 | 内容 | 影响范围 |
+|---|---|---|
+| `2026-10-13__split_menu_permission.sql` | 拆分 `sys_permission` 为菜单表 + 权限表，新增 `sys_role_menu` | 仅鉴权域 4 张表；商品/购物车/订单域不动 |
+
+每个迁移脚本都带**前置校验**（数据不符合预期时主动 `SIGNAL` 中止而非静默继续）与**整表备份**
+（`bak_<日期>_<表名>`，回滚语句写在脚本末尾注释里）。校验通过才执行，因此不会出现
+「迁移跑到一半发现丢了人工配置」的情况。
 
 ### 构建与启动
 
@@ -105,7 +123,10 @@ Tomshop/
         ├── application.yml + application-dev.yml
         ├── logback-spring.xml
         ├── mapper/     自定义 ResultMap XML（阶段 1 起使用）
-        └── db/         建表与初始化 SQL（阶段 1）
+        └── db/
+            ├── schema.sql    建库 + 14 张表（全量重建，仅新环境用）
+            ├── data.sql      初始化数据（全量重建，仅新环境用）
+            └── migration/    增量迁移脚本（已有数据的库用这个）
 ```
 
 **分层纪律**（全项目强制）：
@@ -149,7 +170,31 @@ Java 雪花 ID 为 19 位 `long`，超出 JS `Number.MAX_SAFE_INTEGER`（2^53-1�
   在库存/订单场景下是事故源。缓存统一由阶段 4 的 Caffeine + Redis 承担。
 - Hikari `connection-timeout` 设为 5s（非默认 30s），因为它同时是「数据库宕机时探活接口的最坏耗时」。
 
-### 4.4 公共字段自动填充
+### 4.4 菜单与权限解耦（2026-10-13 重构）
+
+阶段 1 最初把「导航结构」与「权限点」塞进了同一张 `sys_permission`：用 `type` 1/2/3 区分
+目录/菜单/按钮，`parent_id` 自关联成树，`perms` 挂在菜单行上。这个设计有三个硬伤：
+
+1. **新增一个接口权限必须动菜单树** —— 一个纯后端校验权限（如「订单发货」）被迫在导航里占一个位置。
+2. **菜单行被迫携带权限语义** —— 目录行的 `perms` 只能填 `NULL`，出现 `NULL` 即代表「这不是权限」，
+   语义要靠约定而非结构表达。
+3. **无法表达「能看见但不能操作」** —— 只读管理员既需要菜单可见，又必须没有写权限，
+   单表单链路下只能靠 `type` 打补丁。
+
+拆分后：
+
+| 表 | 回答的问题 | 结构 | 授权链路 |
+|---|---|---|---|
+| `sys_menu` | 前端**能看见**哪些导航入口 | 树形（`parent_id` 自关联，二级） | `sys_role_menu` |
+| `sys_permission` | 后端**能执行**什么操作 | 扁平（无 `parent_id`，`perms` 唯一） | `sys_role_permission` |
+
+**两条链路彼此独立、互不推导**：挂上菜单不等于拥有该菜单下所有按钮权限，反之亦然。
+配套的集成测试里有一条断言专门守住这点 —— 两条链路的 ID 空间不允许出现交集。
+
+`sys_permission.perms` 的唯一约束是刻意加的：同一标识在库里存两行，会导致
+「给角色挂了其中一行、鉴权却比对另一行」的静默失效，排查成本极高。
+
+### 4.5 公共字段自动填充
 
 `BaseEntity` 的 `createTime` / `updateTime` / `deleted` / `version` 由 `MybatisMetaObjectHandler` 自动填充，
 业务代码不要手工 set。使用 `strictInsertFill` 语义：仅在字段为 null 时填充，
@@ -177,6 +222,7 @@ Java 雪花 ID 为 19 位 `long`，超出 JS `Number.MAX_SAFE_INTEGER`（2^53-1�
 |---|---|---|
 | **0** | 项目初始化与基础骨架 | ✅ 已完成 |
 | **1** | 数据库设计与基础实体层 | ✅ 已完成 |
+| — | **重构**：鉴权域菜单/权限解耦（阶段 1 后的追加改动） | ✅ 已完成 |
 | 2 | 核心业务模块（商品 / 购物车 / 订单） | ⏳ 待开始 |
 | 3 | 权限安全体系（Shiro + Redis + 双 JWT） | ⏳ |
 | 4 | 多级缓存与性能优化 | ⏳ |
@@ -191,13 +237,13 @@ Java 雪花 ID 为 19 位 `long`，超出 JS `Number.MAX_SAFE_INTEGER`（2^53-1�
 
 ### 阶段 1 交付物
 
-**数据库**：`db/schema.sql`（建库 + 12 张表 + 索引）、`db/data.sql`（角色/权限/分类/示例商品）。
-12 张表分四域：用户权限域（sys_user / sys_role / sys_permission / sys_user_role /
-sys_role_permission / user_address）、商品域（product_category / product_spu / product_sku）、
-购物车域（cart_item）、订单域（order_info / order_item）。
+**数据库**：`db/schema.sql`（建库 + 14 张表 + 索引）、`db/data.sql`（角色/菜单/权限/分类/示例商品）。
+14 张表分四域：用户权限域（sys_user / sys_role / sys_menu / sys_permission / sys_user_role /
+sys_role_permission / sys_role_menu / user_address）、商品域（product_category / product_spu /
+product_sku）、购物车域（cart_item）、订单域（order_info / order_item）。
 
-**代码层**：12 个 Entity（10 个业务实体继承 BaseEntity，2 个关联表实体不继承）、
-12 个 Mapper 接口、两个自定义 ResultMap 示例（`ProductSpuMapper.xml` 的 association 平铺写法、
+**代码层**：14 个 Entity（11 个业务实体继承 BaseEntity，3 个关联表实体不继承）、
+14 个 Mapper 接口、两个自定义 ResultMap 示例（`ProductSpuMapper.xml` 的 association 平铺写法、
 `OrderInfoMapper.xml` 的 collection 一对多写法，配套 `SpuDetailVO` / `OrderDetailVO`）。
 
 **CRUD 垂直切片**：商品分类模块（`CategoryController` → `CategoryService` → `CategoryServiceImpl`），
@@ -205,6 +251,16 @@ sys_role_permission / user_address）、商品域（product_category / product_s
 
 **设计要点**：物理无外键（索引 + 应用层保证引用）、金额 DECIMAL(10,2)、订单收货/商品快照、
 逻辑删除 + 乐观锁统一预埋、雪花 ID 序列化精度保护。
+
+### 阶段 1 后重构：菜单/权限解耦（2026-10-13）
+
+将 `sys_permission` 拆分为 `sys_menu`（导航树，由 `sys_role_menu` 授权）与
+`sys_permission`(扁平权限点，由 `sys_role_permission` 授权)，两条授权链路彼此独立。
+详见「4.4 菜单与权限解耦」。表数 12 → 14。
+
+迁移以 `db/migration/2026-10-13__split_menu_permission.sql` 落地，**只动鉴权域 4 张表** ——
+库中已存在通过接口手工创建的真实数据（如分类「蓝牙耳机」），整库重建会丢失。
+
 
 ### 已解决的版本陷阱
 

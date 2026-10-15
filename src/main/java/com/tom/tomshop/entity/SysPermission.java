@@ -6,35 +6,38 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 
 /**
- * 权限实体（表 sys_permission），树形结构支撑「注解 + 动态权限」。
+ * 权限点实体（表 sys_permission）。
+ *
+ * <p>职责边界：本表只回答「后端允许执行什么操作」，**扁平结构、无父子层级**。
+ * 前端导航由 {@link SysMenu} 独立承担，两者之间没有外键或结构性关联 ——
+ * 授权通过 {@link SysRolePermission}（权限）与 {@link SysRoleMenu}（菜单）两条
+ * 彼此独立的链路完成。
+ *
+ * <p>{@code perms} 在库中有唯一约束，是阶段 3 Shiro 注解（如
+ * {@code @RequiresPermissions("system:user:query")}）的比对依据。
  *
  * @author Tom
+ * @see SysMenu 菜单（导航结构）
  */
 @Data
 @EqualsAndHashCode(callSuper = true)
 @TableName("sys_permission")
 public class SysPermission extends BaseEntity {
 
-    /** 父权限 ID，0 表示根节点 */
-    private Long parentId;
-
     /** 权限名称 */
     private String name;
 
-    /** 类型：1目录 2菜单 3按钮/接口 */
-    private Integer type;
-
-    /** 前端路由或后端接口路径 */
-    private String path;
-
-    /** 权限标识（Shiro 注解用），如 sys:user:list */
+    /** 权限标识，格式 module:resource:action，如 system:user:query（库中唯一） */
     private String perms;
 
-    /** 图标 */
-    private String icon;
+    /** 类型：1按钮 2接口 */
+    private Integer type;
 
-    /** 同级排序，值越小越靠前 */
-    private Integer sort;
+    /** 所属业务模块，仅用于后台分组展示，与菜单无结构性关联 */
+    private String module;
+
+    /** 权限说明 */
+    private String description;
 
     /** 状态：1启用 0禁用 */
     private Integer status;

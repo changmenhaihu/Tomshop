@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.tom.tomshop.entity.SysPermission;
 
 /**
- * 权限 Mapper。
+ * 权限点 Mapper。菜单相关查询见 {@link SysMenuMapper}。
  *
  * @author Tom
  */
