@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+  库存原子扣减 —— 防超卖的核心实现
+
+  为什么不用「selectById 查库存 -> 判断 -> updateById 写回」：
+    两条并发请求 T1、T2 都读到 stock=1，各自判断「1 >= 1 够扣」，
+    然后各自写回 stock=0。结果是卖出一件商品、库存扣了两次，
+    实际卖出 2 件 —— 这就是超卖。查与改之间的时间窗无论多短都存在。
+
+  这里的写法把「判断」塞进 UPDATE 的 WHERE 条件里，
+  由 InnoDB 的行锁保证「读当前值 → 比较 → 写入」在一条语句内原子完成：
+    stock >= #{quantity} 不成立时，该行不被更新，影响行数为 0。
+  调用方通过影响行数区分「扣减成功」与「库存不足」，无需额外查询。
+
+  关于 version 字段：
+    本语句同时让 version 自增，保持乐观锁版本号单调递增（阶段 4 的一致性校验会用到）。
+    但扣减本身的安全性并不依赖 version 比对 —— WHERE 里的 stock >= quantity
+    已经是更强的不变式，因此这里不需要「读取 version -> 比对 -> 失败重试」那套流程。
+
+  注意 deleted = 0 必须显式写：
+    自定义 SQL 不会被 MyBatis-Plus 的逻辑删除插件改写（该插件只作用于 BaseMapper
+    生成的语句），漏写会导致已删除的 SKU 仍可被扣减库存。
+-->
+<mapper namespace="com.tom.tomshop.mapper.ProductSkuMapper">
+
+    <update id="deductStock">
+        UPDATE product_sku
+        SET stock       = stock - #{quantity},
+            sales       = sales + #{quantity},
+            version     = version + 1,
+            update_time = NOW()
+        WHERE id = #{skuId}
+          AND deleted = 0
+          <!-- 库存不足时本行不匹配，影响行数为 0 -->
+          AND stock >= #{quantity}
+    </update>
+
+    <update id="restoreStock">
+        UPDATE product_sku
+        <!--
+          GREATEST(..., 0)：订单取消回补时，若因数据订正等原因导致 sales 已被重置，
+          直接相减会产生负数销量。销量为负会在前端展示成「销量 -3」，很扎眼，
+          这里兜一下底不额外付出成本。
+        -->
+        SET stock       = stock + #{quantity},
+            sales       = GREATEST(sales - #{quantity}, 0),
+            version     = version + 1,
+            update_time = NOW()
+        WHERE id = #{skuId}
+          AND deleted = 0
+    </update>
+
+</mapper>

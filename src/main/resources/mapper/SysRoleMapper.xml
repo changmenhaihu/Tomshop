@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+  用户 -> 角色编码
+
+  只返回启用且未删除的角色：被禁用的角色不应再出现在 @SaCheckRole 的判定里。
+-->
+<mapper namespace="com.tom.tomshop.mapper.SysRoleMapper">
+
+    <select id="selectRoleCodesByUserId" resultType="java.lang.String">
+        SELECT DISTINCT r.role_code
+        FROM sys_user_role ur
+                 INNER JOIN sys_role r ON r.id = ur.role_id
+        WHERE ur.user_id = #{userId}
+          AND r.deleted = 0
+          AND r.status = 1
+          AND r.role_code IS NOT NULL
+          AND r.role_code &lt;&gt; ''
+        ORDER BY r.role_code
+    </select>
+
+</mapper>

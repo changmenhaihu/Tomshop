@@ -10,9 +10,10 @@ import java.time.LocalDateTime;
 /**
  * 用户实体（表 sys_user）。
  *
- * <p>安全约定：{@code password} 只存哈希，绝不存明文。阶段 3 接入 Shiro 后由
- * BCrypt 承担加密；本类在任何场景下都不得把 password 序列化到响应（返回给前端的
- * 是 {@code UserVO}，其中不含该字段）。
+ * <p>安全约定：{@code password} 只存哈希，绝不存明文。阶段 3 起由
+ * {@code BCryptPasswordEncoder} 承担加密（同明文每次结果不同，自带随机盐）；
+ * 本类在任何场景下都不得把 password 序列化到响应（返回给前端的是 {@code UserInfoVO}，
+ * 其中不含该字段）。
  *
  * @author Tom
  */

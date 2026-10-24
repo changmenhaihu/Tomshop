@@ -150,12 +150,12 @@ CREATE TABLE `sys_user_role` (
 -- ----------------------------------------------------------------------------
 DROP TABLE IF EXISTS `sys_role_permission`;
 CREATE TABLE `sys_role_permission` (
-    `id`            BIGINT NOT NULL COMMENT '主键，雪花算法',
-    `role_id`       BIGINT NOT NULL COMMENT '角色ID',
-    `permission_id` BIGINT NOT NULL COMMENT '权限ID',
+    `id`      BIGINT NOT NULL COMMENT '主键，雪花算法',
+    `role_id` BIGINT NOT NULL COMMENT '角色ID',
+    `perm_id` BIGINT NOT NULL COMMENT '权限ID（sys_permission.id）',
     PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_role_permission` (`role_id`, `permission_id`),
-    KEY `idx_permission_id` (`permission_id`)
+    UNIQUE KEY `uk_role_perm` (`role_id`, `perm_id`),
+    KEY `idx_perm_id` (`perm_id`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '角色-权限关联表';
 
 -- ----------------------------------------------------------------------------

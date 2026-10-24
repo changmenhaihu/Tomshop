@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+  用户 -> 可见菜单（动态路由的数据源）
+
+  与权限点完全解耦：只看 sys_role_menu。角色被禁用时其菜单授权随之失效，
+  与「权限点失效」的判断口径保持一致（见 SysPermissionMapper.xml）。
+
+  visible 不在此过滤：
+    visible=1 表示「不在侧边栏展示」，但路由仍需注册（例如详情页、编辑页，
+    只能从列表页跳转进入）。是否展示交由前端根据 meta.hidden 决定，
+    后端过滤掉反而会让这些页面刷新后 404。
+
+  ORDER BY 只保证「同级有序」的输入顺序，跨层级顺序没有意义；
+    但 sort 相同的情况下用 id 兜底，避免 MySQL 返回顺序不稳定导致菜单每次刷新都换位置。
+-->
+<mapper namespace="com.tom.tomshop.mapper.SysMenuMapper">
+
+    <select id="selectMenusByUserId" resultType="com.tom.tomshop.entity.SysMenu">
+        SELECT DISTINCT m.id,
+                        m.parent_id,
+                        m.name,
+                        m.menu_type,
+                        m.path,
+                        m.component,
+                        m.icon,
+                        m.sort,
+                        m.visible,
+                        m.status
+        FROM sys_menu m
+                 INNER JOIN sys_role_menu rm ON rm.menu_id = m.id
+                 INNER JOIN sys_role r ON r.id = rm.role_id
+                 INNER JOIN sys_user_role ur ON ur.role_id = r.id
+        WHERE ur.user_id = #{userId}
+          AND r.deleted = 0
+          AND r.status = 1
+          AND m.deleted = 0
+          AND m.status = 1
+        ORDER BY m.sort, m.id
+    </select>
+
+</mapper>

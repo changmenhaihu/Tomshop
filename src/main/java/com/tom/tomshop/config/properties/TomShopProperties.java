@@ -30,6 +30,9 @@ public class TomShopProperties {
      */
     private Cors cors = new Cors();
 
+    /** 认证配置，见 {@code application.yml} 的 {@code tomshop.auth} */
+    private Auth auth = new Auth();
+
     /**
      * 跨域配置。
      *
@@ -57,5 +60,23 @@ public class TomShopProperties {
 
         /** 预检请求缓存时间（秒），减少 OPTIONS 请求量 */
         private long maxAge = 3600L;
+    }
+
+    /**
+     * 认证（双令牌）配置。
+     *
+     * <p><b>access token 的有效期不在这里</b>：它由 {@code sa-token.timeout} 统一管理，
+     * 因为 Sa-Token 会话、JWT 签名与续期逻辑都以该值为准。此处再放一份会形成两个事实来源，
+     * 改一处另一处静默失效。响应体中的 {@code expiresIn} 直接取自
+     * {@code StpUtil.getTokenTimeout()}，同样是运行时真值。
+     */
+    @Data
+    public static class Auth {
+
+        /** refresh token 有效期（秒），默认 7 天 */
+        private long refreshTokenTimeout = 604800L;
+
+        /** refresh token 在 Redis 中的键前缀；jti → userId，用于轮换与主动吊销 */
+        private String refreshTokenPrefix = "tomshop:auth:refresh:";
     }
 }

@@ -70,6 +70,33 @@ spring:
       connect-timeout: 3000ms
 
 # ==========================================================================
+# Sa-Token 鉴权（阶段 3）
+#
+# 令牌形态见 com.tom.tomshop.config.SaTokenConfig：
+#   access token  = JWT，有效期 timeout 秒，每次业务请求携带
+#   refresh token = 自行签发的 JWT，有效期见 tomshop.auth.refresh-token-timeout
+# ==========================================================================
+sa-token:
+  # 前端携带令牌的请求头名与前缀：Authorization: Bearer <token>
+  token-name: Authorization
+  token-prefix: Bearer
+  # access token 有效期（秒）= 2 小时。刻意偏短：JWT 签发后无法收回，
+  # 缩短时效是限制「令牌被盗」危害窗口的唯一手段，续期交给 refresh token
+  timeout: 7200
+  # 无操作超时：-1 关闭。开启后用户持续活跃就会不断续期，等于取消 timeout 的意义
+  active-timeout: -1
+  # 允许同一账号多端同时在线（手机 + 平板是 B2C 的正常场景）
+  is-concurrent: true
+  # 每次登录签发独立令牌，互不顶替
+  is-share: false
+  # 前后端分离，令牌只走请求头，不读 Cookie（避免 CSRF 面）
+  is-read-header: true
+  is-read-cookie: false
+  # 生产环境必须用 SA_JWT_SECRET 覆盖；密钥短于 32 字节时 HS256 签名会直接报错
+  jwt-secret-key: ${SA_JWT_SECRET:tomshop-dev-only-jwt-secret-key-change-in-prod}
+  is-log: false
+
+# ==========================================================================
 # MyBatis-Plus
 # ==========================================================================
 mybatis-plus:
@@ -120,6 +147,11 @@ knife4j:
 # ==========================================================================
 tomshop:
   application-version: 1.0.0-SNAPSHOT
+  # 认证：refresh token 的有效期与 Redis 键前缀
+  # access token 的有效期不在此处，由上面的 sa-token.timeout 统一管理
+  auth:
+    refresh-token-timeout: 604800
+    refresh-token-prefix: "tomshop:auth:refresh:"
   cors:
     # 生产环境（application-prod.yml）必须覆盖为真实域名白名单
     allowed-origins:

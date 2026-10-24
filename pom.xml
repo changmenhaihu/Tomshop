@@ -15,7 +15,7 @@
       本地仓库：G:/maven-repo（配置于 G:/develop/apache-maven-3.9.16/conf/settings.xml）
 
       依赖引入策略：按阶段增量引入。阶段 0 仅引入 Web / 校验 / 持久层 / Redis / 工具链 / 文档，
-      Shiro(阶段3)、Redisson + Caffeine(阶段4)、Netty + RocketMQ(阶段5) 届时再追加，
+      Sa-Token(阶段3)、Redisson + Caffeine(阶段4)、Netty + RocketMQ(阶段5) 届时再追加，
       以保证每个阶段结束时项目都能独立启动、独立验证。
     -->
     <parent>
@@ -51,6 +51,8 @@
         <springdoc.version>2.3.0</springdoc.version>
         <commons-collections4.version>4.4</commons-collections4.version>
         <commons-io.version>2.16.1</commons-io.version>
+        <!-- 阶段 3：安全框架。用户明确用 Sa-Token 替代原始需求中的 Shiro -->
+        <sa-token.version>1.46.0</sa-token.version>
     </properties>
 
     <dependencies>
@@ -104,6 +106,45 @@
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-pool2</artifactId>
+        </dependency>
+
+        <!-- ==================== 安全：Sa-Token（阶段 3） ==================== -->
+        <!--
+          为什么是 sa-token-spring-boot3-starter 而不是普通 starter：
+          普通版基于 javax.servlet，在 Spring Boot 3（jakarta.*）下拦截器无法装配。
+        -->
+        <dependency>
+            <groupId>cn.dev33</groupId>
+            <artifactId>sa-token-spring-boot3-starter</artifactId>
+            <version>${sa-token.version}</version>
+        </dependency>
+        <!--
+          会话存储切到 Redis：Sa-Token 默认把登录态放在 JVM 内存，多实例部署时
+          A 机登录、B 机校验会直接判未登录。改用 Redis 后登录态可跨实例共享，
+          并且服务重启不会把在线用户集体踢下线。
+        -->
+        <dependency>
+            <groupId>cn.dev33</groupId>
+            <artifactId>sa-token-redis-jackson</artifactId>
+            <version>${sa-token.version}</version>
+        </dependency>
+        <!--
+          JWT 支持：把 access token 签发成 JWT（token-style=jwt + StpLogicJwtForSimple）。
+          与之配套的短时 access + 长时 refresh 双令牌方案见 AuthServiceImpl。
+        -->
+        <dependency>
+            <groupId>cn.dev33</groupId>
+            <artifactId>sa-token-jwt</artifactId>
+            <version>${sa-token.version}</version>
+        </dependency>
+        <!--
+          仅取 BCryptPasswordEncoder，不引入 spring-boot-starter-security ——
+          后者会接管全部请求并塞进一整套过滤器链，与 Sa-Token 的拦截器方案冲突。
+          本包是纯粹的加密工具库，无自动装配。
+        -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-crypto</artifactId>
         </dependency>
 
         <!-- ==================== 工具链 ==================== -->

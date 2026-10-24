@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+  用户 -> 最终生效权限
+
+  为什么要一次 JOIN 到底，而不是「查出角色 ID 列表 -> 再查权限」：
+    后者是两次网络往返，且角色列表为空时会拼出非法的 IN ()。
+    一次 JOIN 由数据库完成集合运算，空结果自然返回空列表。
+
+  过滤条件全部写在 WHERE 而不是 ON：
+    这里没有 LEFT JOIN，任何一侧不满足都不应产生一行。放在 ON 里语义相同但更容易误读成
+    「即使角色被禁用也要保留行」。权限链路上「有一个环节失效即整体失效」是安全默认值。
+
+  DISTINCT 是必需的：
+    一个用户挂多个角色、多个角色又都授权了同一个权限点时，
+    不去重会让同一个 perms 重复出现，缓存与日志里都是噪声。
+-->
+<mapper namespace="com.tom.tomshop.mapper.SysPermissionMapper">
+
+    <select id="selectPermsByUserId" resultType="java.lang.String">
+        SELECT DISTINCT p.perms
+        FROM sys_user_role ur
+                 INNER JOIN sys_role r ON r.id = ur.role_id
+                 INNER JOIN sys_role_permission rp ON rp.role_id = r.id
+                 INNER JOIN sys_permission p ON p.id = rp.perm_id
+        WHERE ur.user_id = #{userId}
+          AND r.deleted = 0
+          AND r.status = 1
+          AND p.deleted = 0
+          AND p.status = 1
+          AND p.perms IS NOT NULL
+          AND p.perms &lt;&gt; ''
+        ORDER BY p.perms
+    </select>
+
+</mapper>

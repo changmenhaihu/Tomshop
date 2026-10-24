@@ -1,5 +1,6 @@
 package com.tom.tomshop.controller;
 
+import cn.dev33.satoken.annotation.SaCheckPermission;
 import com.tom.tomshop.common.constant.CommonConstants;
 import com.tom.tomshop.common.result.PageResult;
 import com.tom.tomshop.common.result.Result;
@@ -28,6 +29,8 @@ import java.util.List;
  *
  * <p>阶段 1 的「基础 CRUD 垂直切片」，用于验证：实体映射、逻辑删除、公共字段自动填充、
  * 分页 + 排序白名单、树形组装。业务约束在阶段 2 商品管理完善。
+ *
+ * <p>阶段 3 起读接口匿名放行（GET），写接口需 {@code product:category:save} 权限点。
  *
  * @author Tom
  */
@@ -58,20 +61,24 @@ public class CategoryController {
         return Result.success(categoryService.detail(id));
     }
 
-    @Operation(summary = "新增分类")
+    @Operation(summary = "新增分类", description = "需 product:category:save")
+    @SaCheckPermission("product:category:save")
     @PostMapping
     public Result<Long> create(@Valid @RequestBody CategorySaveDTO dto) {
         return Result.success(categoryService.create(dto));
     }
 
-    @Operation(summary = "更新分类")
+    @Operation(summary = "更新分类", description = "需 product:category:save")
+    @SaCheckPermission("product:category:save")
     @PutMapping("/{id}")
     public Result<Void> update(@PathVariable Long id, @Valid @RequestBody CategorySaveDTO dto) {
         categoryService.update(id, dto);
         return Result.success();
     }
 
-    @Operation(summary = "删除分类", description = "逻辑删除，被逻辑删除的分类不会再出现在任何查询结果中")
+    @Operation(summary = "删除分类",
+            description = "逻辑删除，被逻辑删除的分类不会再出现在任何查询结果中。需 product:category:save")
+    @SaCheckPermission("product:category:save")
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id) {
         categoryService.delete(id);

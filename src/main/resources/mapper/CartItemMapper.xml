@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+  加购 upsert —— 见 CartItemMapper#upsertItem 的详细说明。
+
+  两个关键点：
+    1. 唯一键 uk_user_sku(user_id, sku_id) 不含 deleted 列，
+       所以被逻辑删除的条目仍占用唯一键，必须靠 ON DUPLICATE KEY UPDATE 复活，
+       而不能用「先查后插」（查询会被 @TableLogic 过滤，导致误判为不存在）。
+    2. ON DUPLICATE KEY UPDATE 子句里引用列时统一带表名前缀 cart_item.，
+       避免与行别名 new 产生歧义（MySQL 8.0.19+ 的行别名语法）。
+-->
+<mapper namespace="com.tom.tomshop.mapper.CartItemMapper">
+
+    <insert id="upsertItem">
+        INSERT INTO cart_item (`id`, `user_id`, `sku_id`, `quantity`, `selected`,
+                               `create_time`, `update_time`, `deleted`, `version`)
+        VALUES (#{id}, #{userId}, #{skuId}, #{quantity}, 1,
+                NOW(), NOW(), 0, 0) AS new
+        ON DUPLICATE KEY UPDATE
+            <!--
+              已删除 -> 数量直接取本次值（复活语义）；
+              未删除 -> 在原有数量上累加。
+              最后统一用 LEAST 封顶，保证并发下也不会突破上限。
+            -->
+            `quantity`    = LEAST(
+                                IF(`cart_item`.`deleted` = 1,
+                                   `new`.`quantity`,
+                                   `cart_item`.`quantity` + `new`.`quantity`),
+                                #{maxQuantity}),
+            <!-- 加购即视为勾选：用户主动加购的意图就是「打算买」 -->
+            `selected`    = 1,
+            `deleted`     = 0,
+            `update_time` = NOW(),
+            `version`     = `cart_item`.`version` + 1
+    </insert>
+
+</mapper>

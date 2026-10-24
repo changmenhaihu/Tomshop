@@ -119,7 +119,7 @@ class MenuPermissionSplitIntegrationTest {
         // 拆分前菜单与权限共用一张表、共用一套 ID；现在若还有交集，
         // 说明解耦没做干净（比如仍按旧 id 关联）。
         List<Long> menuIds = roleMenus.stream().map(SysRoleMenu::getMenuId).toList();
-        List<Long> permIds = rolePerms.stream().map(SysRolePermission::getPermissionId).toList();
+        List<Long> permIds = rolePerms.stream().map(SysRolePermission::getPermId).toList();
         assertThat(menuIds).doesNotContainAnyElementsOf(permIds);
     }
 

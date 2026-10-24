@@ -13,8 +13,10 @@ import lombok.EqualsAndHashCode;
  * 授权通过 {@link SysRolePermission}（权限）与 {@link SysRoleMenu}（菜单）两条
  * 彼此独立的链路完成。
  *
- * <p>{@code perms} 在库中有唯一约束，是阶段 3 Shiro 注解（如
- * {@code @RequiresPermissions("system:user:query")}）的比对依据。
+ * <p>{@code perms} 在库中有唯一约束，是 Sa-Token 权限注解（如
+ * {@code @SaCheckPermission("product:spu:save")}）的比对依据。
+ * 比对时 Sa-Token 回调 {@code StpInterfaceImpl#getPermissionList}，
+ * 由该方法一次 JOIN 查出当前账号的全部权限标识。
  *
  * @author Tom
  * @see SysMenu 菜单（导航结构）

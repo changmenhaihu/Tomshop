@@ -6,6 +6,7 @@ import com.tom.tomshop.mapper.OrderInfoMapper;
 import com.tom.tomshop.mapper.OrderItemMapper;
 import com.tom.tomshop.mapper.ProductSpuMapper;
 import com.tom.tomshop.vo.OrderDetailVO;
+import com.tom.tomshop.vo.OrderItemVO;
 import com.tom.tomshop.vo.SpuDetailVO;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -82,9 +83,9 @@ class ResultMapIntegrationTest {
         assertThat(vo.getOrderNo()).isEqualTo(order.getOrderNo());
         // 一对多关联：订单 -> 明细列表，命中 2 条
         assertThat(vo.getItems()).hasSize(2);
-        // 关键：item_total_amount 别名是否正确映射回 OrderItem.totalAmount
+        // 关键：item_total_amount 别名是否正确映射回 OrderItemVO.totalAmount
         assertThat(vo.getItems())
-                .extracting(OrderItem::getQuantity)
+                .extracting(OrderItemVO::getQuantity)
                 .containsExactlyInAnyOrder(1, 2);
         assertThat(vo.getItems())
                 .allMatch(item -> item.getOrderNo().equals(order.getOrderNo()));

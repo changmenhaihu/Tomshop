@@ -1,11 +1,17 @@
 package com.tom.tomshop.exception;
 
+import cn.dev33.satoken.exception.NotLoginException;
+import cn.dev33.satoken.exception.NotPermissionException;
+import cn.dev33.satoken.exception.NotRoleException;
+import cn.dev33.satoken.exception.SaTokenException;
 import com.tom.tomshop.common.result.Result;
 import com.tom.tomshop.common.result.ResultCode;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.BindException;
 import org.springframework.validation.FieldError;
@@ -24,9 +30,12 @@ import java.util.stream.Collectors;
  *
  * <p>设计要点：
  * <ul>
- *   <li>所有异常出口都返回 {@code Result}，HTTP 状态码统一保持 200，由业务码驱动前端行为——
- *       避免前端既解析 HTTP 状态又解析响应体。（阶段 3 的 401 会额外保留 HTTP 401，
- *       以便前端拦截器区分「需刷新 Token」与其他业务失败。）</li>
+ *   <li>所有异常出口都返回 {@code Result} 结构；HTTP 状态码只在「未登录 401 / 无权限 403」
+ *       两种情况下与业务码对齐，其余一律 200，由业务码驱动前端行为。
+ *       这样前端拦截器可以用最简规则处理令牌过期（{@code status === 401} 就触发刷新），
+ *       同时又不至于让「库存不足」这类业务失败带上 4xx 状态而被监控误判为接口异常。</li>
+ *   <li>Sa-Token 抛出的 {@link NotLoginException} / {@link NotPermissionException}
+ *       在此统一转换，业务代码不需要 try-catch 任何鉴权异常。</li>
  *   <li>参数校验类异常记 warn，业务异常记 warn，未预期异常记 error 并保留堆栈。</li>
  *   <li>日志中始终带 uri + method，便于线上定位；不把堆栈信息返回给客户端。</li>
  * </ul>
@@ -39,10 +48,68 @@ public class GlobalExceptionHandler {
 
     /** 业务异常：可预期分支，不打印堆栈 */
     @ExceptionHandler(BusinessException.class)
-    public Result<Void> handleBusinessException(BusinessException e, HttpServletRequest request) {
+    public ResponseEntity<Result<Void>> handleBusinessException(BusinessException e, HttpServletRequest request) {
         log.warn("[业务异常] {} {} -> code={}, message={}",
                 request.getMethod(), request.getRequestURI(), e.getCode(), e.getMessage());
-        return Result.fail(e.getCode(), e.getMessage());
+        // 401/403 与 HTTP 语义对齐（前端拦截器据此触发刷新或跳登录），其余保持 200
+        HttpStatus status = switch (e.getCode() == null ? 0 : e.getCode()) {
+            case 401, 403 -> HttpStatus.valueOf(e.getCode());
+            default -> HttpStatus.OK;
+        };
+        return ResponseEntity.status(status).body(Result.fail(e.getCode(), e.getMessage()));
+    }
+
+    /**
+     * 未登录 / 令牌失效。
+     *
+     * <p>区分具体原因只用于给出更准确的前端提示（如「账号已在其他设备登录」引导用户重新登录，
+     * 而不是让他重试），但不向客户端暴露令牌内容或内部类型名。
+     */
+    @ExceptionHandler(NotLoginException.class)
+    public ResponseEntity<Result<Void>> handleNotLogin(NotLoginException e, HttpServletRequest request) {
+        String type = e.getType();
+        String message;
+        if (NotLoginException.TOKEN_TIMEOUT.equals(type)) {
+            message = "登录状态已过期，请重新登录";
+        } else if (NotLoginException.BE_REPLACED.equals(type)) {
+            message = "账号已在其他设备登录";
+        } else if (NotLoginException.KICK_OUT.equals(type)) {
+            message = "账号已被强制下线";
+        } else if (NotLoginException.TOKEN_FREEZE.equals(type)) {
+            message = "账号已被临时冻结，请稍后再试";
+        } else if (NotLoginException.NO_PREFIX.equals(type)) {
+            message = "令牌格式不正确，应为 Authorization: Bearer <token>";
+        } else {
+            message = "请先登录后再操作";
+        }
+        log.warn("[未登录] {} {} -> type={}", request.getMethod(), request.getRequestURI(), type);
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(Result.fail(ResultCode.UNAUTHORIZED, message));
+    }
+
+    /** 已登录但缺少所需权限点 / 角色 */
+    @ExceptionHandler(NotPermissionException.class)
+    public ResponseEntity<Result<Void>> handleNotPermission(NotPermissionException e, HttpServletRequest request) {
+        // 具体缺哪个权限只进日志：返回给前端会把后台权限模型暴露给普通用户
+        log.warn("[无权限] {} {} -> 缺少权限点 {}", request.getMethod(), request.getRequestURI(), e.getPermission());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(Result.fail(ResultCode.FORBIDDEN, "无权执行该操作"));
+    }
+
+    /** 已登录但缺少所需角色 */
+    @ExceptionHandler(NotRoleException.class)
+    public ResponseEntity<Result<Void>> handleNotRole(NotRoleException e, HttpServletRequest request) {
+        log.warn("[无权限] {} {} -> 缺少角色 {}", request.getMethod(), request.getRequestURI(), e.getRole());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(Result.fail(ResultCode.FORBIDDEN, "无权执行该操作"));
+    }
+
+    /** 其余 Sa-Token 异常（如 JWT 解析失败、账号被踢、二级认证未通过）兜底为 401 */
+    @ExceptionHandler(SaTokenException.class)
+    public ResponseEntity<Result<Void>> handleSaTokenException(SaTokenException e, HttpServletRequest request) {
+        log.warn("[鉴权异常] {} {} -> {}", request.getMethod(), request.getRequestURI(), e.getMessage());
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(Result.fail(ResultCode.UNAUTHORIZED));
     }
 
     /** @RequestBody + @Valid 校验失败 */
