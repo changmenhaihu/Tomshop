@@ -152,6 +152,25 @@ tomshop:
   auth:
     refresh-token-timeout: 604800
     refresh-token-prefix: "tomshop:auth:refresh:"
+  # 多级缓存：Caffeine(L1) → Redis(L2) → MySQL
+  # TTL 的最终取值由各调用点的 CachePolicy 决定，这里的 local/remote 只是默认值
+  cache:
+    enabled: true
+    # 前缀带 v1：缓存格式不兼容时改版本号即可整体失效，不必去 Redis 里扫键
+    key-prefix: "tomshop:cache:v1:"
+    invalidation-channel: "tomshop:cache:invalidate"
+    local-maximum-size: 10000
+    local-ttl-seconds: 120
+    remote-ttl-seconds: 600
+    # 空值缓存要短：太长会把「刚创建的数据」误判为不存在
+    null-ttl-seconds: 60
+    # ±10% 随机抖动，打散同一批键的过期时刻，防雪崩
+    ttl-jitter-ratio: 0.1
+    # 事务提交后 500ms 再删一次，覆盖「读旧值回填」的竞态窗口
+    delayed-evict-millis: 500
+    lock-wait-seconds: 2
+    lock-lease-seconds: 10
+    remote-retry-backoff-millis: 5000
   cors:
     # 生产环境（application-prod.yml）必须覆盖为真实域名白名单
     allowed-origins:

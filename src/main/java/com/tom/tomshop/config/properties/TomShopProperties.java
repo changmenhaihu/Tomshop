@@ -33,6 +33,9 @@ public class TomShopProperties {
     /** 认证配置，见 {@code application.yml} 的 {@code tomshop.auth} */
     private Auth auth = new Auth();
 
+    /** 多级缓存配置，见 {@code application.yml} 的 {@code tomshop.cache} */
+    private Cache cache = new Cache();
+
     /**
      * 跨域配置。
      *
@@ -78,5 +81,53 @@ public class TomShopProperties {
 
         /** refresh token 在 Redis 中的键前缀；jti → userId，用于轮换与主动吊销 */
         private String refreshTokenPrefix = "tomshop:auth:refresh:";
+    }
+
+    /**
+     * 多级缓存配置。
+     *
+     * <p>{@code key-prefix} 里带 {@code v1}：缓存格式一旦不兼容（字段语义变化），
+     * 改前缀即可让整批旧数据自然失效，不需要去 Redis 里扫键删除。
+     *
+     * <p>{@code enabled=false} 时所有缓存读写直通，用于排障与压测基线对比。
+     */
+    @Data
+    public static class Cache {
+
+        /** 总开关。关闭后 {@code getOrLoad} 直接回源，不做任何缓存写入 */
+        private boolean enabled = true;
+
+        /** Redis 键前缀，同时也是缓存代际版本 */
+        private String keyPrefix = "tomshop:cache:v1:";
+
+        /** 跨实例失效广播频道 */
+        private String invalidationChannel = "tomshop:cache:invalidate";
+
+        /** L1 最大条目数，超出后 Caffeine 按 Window TinyLFU 淘汰 */
+        private long localMaximumSize = 10_000L;
+
+        /** 未显式指定策略时的 L1 默认 TTL（秒） */
+        private long localTtlSeconds = 120L;
+
+        /** 未显式指定策略时的 L2 默认 TTL（秒） */
+        private long remoteTtlSeconds = 600L;
+
+        /** 空值缓存 TTL（秒）。太长会让「刚创建的数据」被误判为不存在，因此取小值 */
+        private long nullTtlSeconds = 60L;
+
+        /** L2 TTL 随机抖动比例（0.1 表示 ±10%），用于打散过期时刻 */
+        private double ttlJitterRatio = 0.1d;
+
+        /** 事务提交后延迟二次删除的间隔（毫秒）；<=0 关闭 */
+        private long delayedEvictMillis = 500L;
+
+        /** 缓存回源抢锁的最长等待（秒） */
+        private long lockWaitSeconds = 2L;
+
+        /** 缓存回源锁的租期（秒），到期自动释放，防止进程崩溃留下死锁 */
+        private long lockLeaseSeconds = 10L;
+
+        /** Redisson 不可用/Redis 报错后的熔断时长（毫秒），期间跳过 L2 */
+        private long remoteRetryBackoffMillis = 5000L;
     }
 }

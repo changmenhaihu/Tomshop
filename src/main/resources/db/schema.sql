@@ -243,7 +243,12 @@ CREATE TABLE `product_spu` (
     `version`      INT           NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
     PRIMARY KEY (`id`),
     KEY `idx_category_id` (`category_id`),
-    KEY `idx_status` (`status`)
+    KEY `idx_status` (`status`),
+    -- 以下三个复合索引见 migration/2026-10-24__add_query_indexes.sql：
+    -- 让「过滤 + 排序」走同一棵索引树，消除商品列表的 filesort
+    KEY `idx_deleted_create_time` (`deleted`, `create_time`),
+    KEY `idx_status_create_time` (`status`, `create_time`),
+    KEY `idx_category_status_create` (`category_id`, `status`, `create_time`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '商品 SPU 表';
 
 -- ----------------------------------------------------------------------------
@@ -265,7 +270,9 @@ CREATE TABLE `product_sku` (
     `deleted`     TINYINT       NOT NULL DEFAULT 0 COMMENT '逻辑删除：0未删 1已删',
     `version`     INT           NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
     PRIMARY KEY (`id`),
-    KEY `idx_spu_id` (`spu_id`)
+    KEY `idx_spu_id` (`spu_id`),
+    -- 商品详情的 SKU 列表按 spu_id + price 排序，见 migration/2026-10-24__add_query_indexes.sql
+    KEY `idx_spu_price` (`spu_id`, `price`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '商品 SKU 表';
 
 -- ============================================================================
@@ -324,7 +331,10 @@ CREATE TABLE `order_info` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_order_no` (`order_no`),
     KEY `idx_user_id` (`user_id`),
-    KEY `idx_status` (`status`)
+    KEY `idx_status` (`status`),
+    -- 「我的订单」按用户 +（可选）状态过滤、下单时间倒序，见 migration/2026-10-24__add_query_indexes.sql
+    KEY `idx_user_status_create` (`user_id`, `status`, `create_time`),
+    KEY `idx_user_create` (`user_id`, `create_time`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '订单主表';
 
 -- ----------------------------------------------------------------------------

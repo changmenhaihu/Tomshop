@@ -53,6 +53,21 @@
         <commons-io.version>2.16.1</commons-io.version>
         <!-- 阶段 3：安全框架。用户明确用 Sa-Token 替代原始需求中的 Shiro -->
         <sa-token.version>1.46.0</sa-token.version>
+        <!--
+          阶段 4：多级缓存。
+          Caffeine 2.9.3 / Redisson 3.31.0 是本机离线仓库中可用的版本（无外网）。
+          Caffeine 3.x 需要 Java 11+，本项目与 2.9.x 的 API 用法一致；
+          Redisson 3.31.0 与 3.34.x 在锁/限流 API 上无差异。联网后可平滑升级。
+        -->
+        <caffeine.version>2.9.3</caffeine.version>
+        <redisson.version>3.31.0</redisson.version>
+        <!--
+          离线仓库里 netty-resolver-dns 只到 4.1.113，而 Boot 3.3.5 管理的默认版本是 4.1.114。
+          显式对齐到 4.1.113（该版本下本模块所需 artifact 齐全），联网后可删除本属性。
+        -->
+        <netty.version>4.1.113.Final</netty.version>
+        <!-- redisson 3.31.0 的父 POM 声明 rxjava 3.1.9，本地只有 3.1.8；直接声明以覆盖传递版本 -->
+        <rxjava.version>3.1.8</rxjava.version>
     </properties>
 
     <dependencies>
@@ -106,6 +121,49 @@
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-pool2</artifactId>
+        </dependency>
+
+        <!-- ==================== 多级缓存：Caffeine L1 + Redisson 分布式锁（阶段 4） ==================== -->
+        <dependency>
+            <groupId>com.github.ben-manes.caffeine</groupId>
+            <artifactId>caffeine</artifactId>
+            <version>${caffeine.version}</version>
+        </dependency>
+        <!--
+          只引 redisson 核心包，不引 redisson-spring-boot-starter：
+          后者会用 Redisson 顶替 Boot 自动装配的 Lettuce 连接工厂，并把 Spring Data Redis
+          的序列化配置换成自己的一套，与现有 RedisConfig / Sa-Token 的 StringRedisTemplate 产生隐性耦合。
+          本项目只需要 RedissonClient 做分布式锁，连接配置自行构建更可控。
+        -->
+        <dependency>
+            <groupId>org.redisson</groupId>
+            <artifactId>redisson</artifactId>
+            <version>${redisson.version}</version>
+            <exclusions>
+                <!-- rxjava 3.1.9 不在本地仓库；改为下面显式声明的 3.1.8，避免离线解析时告警 -->
+                <exclusion>
+                    <groupId>io.reactivex.rxjava3</groupId>
+                    <artifactId>rxjava</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <!--
+          redisson 的 netty 依赖声明为 provided（不传递），运行期必须自带。
+          版本交给 spring-boot-dependencies 管理（与 Boot 3.3.5 对齐），不手写版本号。
+        -->
+        <dependency>
+            <groupId>io.netty</groupId>
+            <artifactId>netty-handler</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.netty</groupId>
+            <artifactId>netty-resolver-dns</artifactId>
+        </dependency>
+        <!-- redisson 的响应式 API 依赖 rxjava3；锁功能本身不用，但类加载期需要它在 classpath -->
+        <dependency>
+            <groupId>io.reactivex.rxjava3</groupId>
+            <artifactId>rxjava</artifactId>
+            <version>${rxjava.version}</version>
         </dependency>
 
         <!-- ==================== 安全：Sa-Token（阶段 3） ==================== -->

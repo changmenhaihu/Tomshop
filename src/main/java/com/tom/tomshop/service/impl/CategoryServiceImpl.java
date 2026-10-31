@@ -3,6 +3,10 @@ package com.tom.tomshop.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.tom.tomshop.cache.CacheKeys;
+import com.tom.tomshop.cache.CachePolicy;
+import com.tom.tomshop.cache.MultiLevelCache;
 import com.tom.tomshop.common.result.PageResult;
 import com.tom.tomshop.common.result.ResultCode;
 import com.tom.tomshop.convert.CategoryConverter;
@@ -38,11 +42,33 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class CategoryServiceImpl implements CategoryService {
 
+    /**
+     * 分类树缓存策略：L1 5 分钟 / L2 30 分钟。
+     *
+     * <p>分类是典型的「读多写极少」数据，但写操作必须走 {@code evictAfterCommit}：
+     * 依赖 TTL 自然过期会让运营改完分类后，前台最长半小时看不到变化。
+     */
+    private static final CachePolicy TREE_CACHE_POLICY = CachePolicy.of(300, 1800);
+
+    private static final TypeReference<List<CategoryVO>> TREE_TYPE = new TypeReference<>() {
+    };
+
     private final ProductCategoryMapper categoryMapper;
     private final CategoryConverter categoryConverter;
+    private final MultiLevelCache cache;
 
     @Override
     public List<CategoryVO> tree() {
+        return cache.getOrLoad(CacheKeys.CATEGORY_TREE, TREE_TYPE, this::loadTree, TREE_CACHE_POLICY);
+    }
+
+    /**
+     * 回源：查上架分类并组装成树。
+     *
+     * <p>返回的可变 {@code List} 会被缓存在 Redis 中，调用方（Controller → Jackson 序列化）
+     * 只读不写，因此不做防御性拷贝。
+     */
+    private List<CategoryVO> loadTree() {
         List<ProductCategory> all = categoryMapper.selectList(
                 new LambdaQueryWrapper<ProductCategory>()
                         .eq(ProductCategory::getStatus, 1)
@@ -84,6 +110,7 @@ public class CategoryServiceImpl implements CategoryService {
     public Long create(CategorySaveDTO dto) {
         ProductCategory entity = categoryConverter.toEntity(dto);
         categoryMapper.insert(entity);
+        evictCategoryCaches();
         log.info("[分类新增] id={}, name={}, parentId={}", entity.getId(), entity.getName(), entity.getParentId());
         return entity.getId();
     }
@@ -96,6 +123,7 @@ public class CategoryServiceImpl implements CategoryService {
         ProductCategory update = categoryConverter.toEntity(dto);
         update.setId(exist.getId());
         categoryMapper.updateById(update);
+        evictCategoryCaches();
         log.info("[分类更新] id={}, name={}", id, dto.getName());
     }
 
@@ -106,7 +134,21 @@ public class CategoryServiceImpl implements CategoryService {
         requireCategory(id);
         // @TableLogic 会把 removeById 改写为 UPDATE deleted=1（逻辑删除）
         categoryMapper.deleteById(id);
+        evictCategoryCaches();
         log.info("[分类删除] id={}", id);
+    }
+
+    /**
+     * 失效分类相关缓存。
+     *
+     * <p>必须同时清两个键：分类树用于导航展示，父子映射用于商品分页的分类展开，
+     * 漏掉任何一个都会出现「导航更新了、商品筛选还是旧范围」的割裂现象。
+     *
+     * <p>用 {@code evictAfterCommit} 而非直接删：本方法运行在事务中，
+     * 提交前删缓存会让并发读把尚未提交的旧值重新写回。
+     */
+    private void evictCategoryCaches() {
+        cache.evictAfterCommit(CacheKeys.CATEGORY_TREE, CacheKeys.CATEGORY_CHILDREN_MAP);
     }
 
     /**

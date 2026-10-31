@@ -9,6 +9,7 @@
 | [phase-1-database.md](phase-1-database.md) | 阶段 1：数据库设计、实体与 Mapper、CRUD 垂直切片、菜单/权限解耦重构 |
 | [phase-2-business.md](phase-2-business.md) | 阶段 2：商品 / 购物车 / 订单核心业务 |
 | [phase-3-auth.md](phase-3-auth.md) | 阶段 3：Sa-Token + 双 JWT 鉴权、权限点、动态路由 |
+| [phase-4-cache.md](phase-4-cache.md) | 阶段 4：Caffeine + Redis 多级缓存、三防、一致性、复合索引与 EXPLAIN 验证 |
 | [api.md](api.md) | 接口总览（持续更新） |
 | [troubleshooting.md](troubleshooting.md) | 跨阶段踩坑记录（依赖版本、驱动、中间件） |
 

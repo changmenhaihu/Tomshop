@@ -13,6 +13,9 @@
 - **处理**：`mvn clean` 后重新编译。**不要**在报这类版本错误时反复改 POM。
 - **预防**：执行构建前显式 `export JAVA_HOME="G:/develop/jdk"`（PATH 上的 `java` 是 JDK 18，
   IDE 内置 JRE 可能是更新的版本）。
+- **注意**：IDE 开启自动构建时，会在两次 Maven 运行之间把 `target/classes`、`target/test-classes`
+  用 IDE 自带的高版本 JDK 重写一遍。此时即使源码没变，下一次 `mvn test` 也会报版本 69.0。
+  命令行验证请始终使用 `mvn clean test`，不要依赖增量编译。
 
 ### 1.2 MapStruct 的 `Unmapped target property` 警告
 
@@ -39,7 +42,17 @@
 knife4j 4.5.0 传递的 springdoc 2.3.0 面向 Spring Boot 3.2。已在 POM 中显式提升到 2.6.0。
 实测 `/doc.html`、`/v3/api-docs` 返回 200。
 
-### 2.3 Sa-Token 的 `sa-token-redis-jackson` 是空壳
+### 2.3 离线仓库导致的版本回退（阶段 4）
+
+- **现象**：`mvn -o` 解析 Caffeine 3.1.8 / Redisson 3.34.1 / netty-resolver-dns 4.1.114 /
+  rxjava 3.1.9 失败，联网报 `SSL peer shut down incorrectly`。
+- **根因**：本机 `G:/maven-repo` 里只有部分版本，且当前无外网。
+- **处理**：退到仓库中实际存在的版本 —— Caffeine 2.9.3、Redisson 3.31.0；
+  POM 显式声明 `<netty.version>4.1.113.Final</netty.version>`，
+  并把 Redisson 传递的 `rxjava` 排除后显式声明 3.1.8。
+- **影响**：仅版本号差异，本项目用到的 API 一致；联网后删除这些覆盖即可。
+
+### 2.4 Sa-Token 的 `sa-token-redis-jackson` 是空壳
 
 - `sa-token-redis-jackson-1.46.0.jar` 只是聚合器，实际实现（`SaTokenDaoForRedisTemplate`）
   在 `sa-token-redis-template` 中，经 `AutoConfiguration.imports` 装配。

@@ -3,6 +3,10 @@ package com.tom.tomshop.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.tom.tomshop.cache.CacheKeys;
+import com.tom.tomshop.cache.CachePolicy;
+import com.tom.tomshop.cache.MultiLevelCache;
 import com.tom.tomshop.common.enums.ProductStatusEnum;
 import com.tom.tomshop.common.result.PageResult;
 import com.tom.tomshop.common.result.ResultCode;
@@ -51,11 +55,32 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class SpuServiceImpl implements SpuService {
 
+    /**
+     * 商品详情缓存策略：L1 60 秒 / L2 5 分钟。
+     *
+     * <p>TTL 刻意比其他数据短：详情里带 SKU 库存，而下单扣库存不会逐个失效商品详情
+     * （那会让一次下单触发大量缓存删除）。5 分钟内库存显示可能偏乐观，
+     * <b>真正的库存校验发生在加购与下单路径上，且那条路径不走缓存</b>。
+     */
+    private static final CachePolicy DETAIL_CACHE_POLICY = CachePolicy.of(60, 300);
+
+    /**
+     * 分类父子映射缓存策略：L1 5 分钟 / L2 30 分钟，与分类树保持一致。
+     */
+    private static final CachePolicy CATEGORY_MAP_CACHE_POLICY = CachePolicy.of(300, 1800);
+
+    private static final TypeReference<SpuDetailVO> DETAIL_TYPE = new TypeReference<>() {
+    };
+
+    private static final TypeReference<Map<Long, List<Long>>> CATEGORY_CHILDREN_TYPE = new TypeReference<>() {
+    };
+
     private final ProductSpuMapper spuMapper;
     private final ProductSkuMapper skuMapper;
     private final ProductCategoryMapper categoryMapper;
     private final SpuConverter spuConverter;
     private final SkuConverter skuConverter;
+    private final MultiLevelCache cache;
 
     @Override
     public PageResult<SpuVO> page(SpuQueryDTO query) {
@@ -97,10 +122,24 @@ public class SpuServiceImpl implements SpuService {
 
     @Override
     public SpuDetailVO detail(Long id) {
+        // 回源函数返回 null 代表「商品不存在」，由缓存层写入空值标记，
+        // 避免爬虫/恶意请求用一个不存在的 ID 反复打穿到数据库
+        SpuDetailVO detail = cache.getOrLoad(CacheKeys.productDetail(id), DETAIL_TYPE,
+                () -> loadDetail(id), DETAIL_CACHE_POLICY);
+        if (detail == null) {
+            throw new BusinessException(ResultCode.SPU_NOT_FOUND, "商品不存在：id=" + id);
+        }
+        return detail;
+    }
+
+    /**
+     * 商品详情回源：SPU（含分类名）+ SKU 列表。
+     */
+    private SpuDetailVO loadDetail(Long id) {
         // 走自定义 ResultMap（ProductSpuMapper.xml）：一次带出 SPU 与所属分类名称
         SpuDetailVO detail = spuMapper.selectSpuDetail(id);
         if (detail == null) {
-            throw new BusinessException(ResultCode.SPU_NOT_FOUND, "商品不存在：id=" + id);
+            return null;
         }
         // SKU 是一对多，单独查一次避免 SQL 行膨胀（见 SpuDetailVO 类注释）
         detail.setSkuList(loadSkuList(id));
@@ -139,6 +178,7 @@ public class SpuServiceImpl implements SpuService {
         spuMapper.updateById(update);
 
         int affected = syncSkus(id, dto.getSkuList());
+        cache.evictAfterCommit(CacheKeys.productDetail(id));
         log.info("[商品更新] id={}, name={}, SKU 变更={} 条", id, dto.getName(), affected);
     }
 
@@ -150,6 +190,7 @@ public class SpuServiceImpl implements SpuService {
         update.setId(id);
         update.setStatus(status);
         spuMapper.updateById(update);
+        cache.evictAfterCommit(CacheKeys.productDetail(id));
         log.info("[商品状态变更] id={}, status={}", id, status);
     }
 
@@ -160,6 +201,7 @@ public class SpuServiceImpl implements SpuService {
         spuMapper.deleteById(id);
         // SKU 一并逻辑删除，避免产生查不到商品归属的孤儿规格
         skuMapper.delete(new LambdaQueryWrapper<ProductSku>().eq(ProductSku::getSpuId, id));
+        cache.evictAfterCommit(CacheKeys.productDetail(id));
         log.info("[商品删除] id={}", id);
     }
 
@@ -260,13 +302,14 @@ public class SpuServiceImpl implements SpuService {
      * 而不是递归发 SQL —— 后者在分类层级加深时会变成 N 次查询，且容易写出死循环。
      */
     private Set<Long> collectCategoryIds(Long rootId) {
-        List<ProductCategory> all = categoryMapper.selectList(
-                new LambdaQueryWrapper<ProductCategory>()
-                        .select(ProductCategory::getId, ProductCategory::getParentId));
-
-        Map<Long, List<Long>> childrenByParent = all.stream()
-                .collect(Collectors.groupingBy(ProductCategory::getParentId,
-                        Collectors.mapping(ProductCategory::getId, Collectors.toList())));
+        // 父子映射走 L1+L2 缓存：它只有一条键、几十个条目，却在每次带分类筛选的商品分页中
+        // 都要用到。原始实现是「每个请求全表扫一遍分类表」，商品浏览高峰期这部分是纯浪费。
+        Map<Long, List<Long>> childrenByParent = cache.getOrLoad(
+                CacheKeys.CATEGORY_CHILDREN_MAP, CATEGORY_CHILDREN_TYPE,
+                this::loadCategoryChildrenMap, CATEGORY_MAP_CACHE_POLICY);
+        if (childrenByParent == null) {
+            childrenByParent = Map.of();
+        }
 
         Set<Long> result = new HashSet<>();
         Deque<Long> queue = new ArrayDeque<>();
@@ -284,6 +327,23 @@ public class SpuServiceImpl implements SpuService {
             }
         }
         return result.isEmpty() ? Set.of(rootId) : result;
+    }
+
+    /**
+     * 回源：把分类表读成「父 ID → 子 ID 列表」。
+     *
+     * <p>只取 id / parentId 两列，且只取未删除的行（{@code @TableLogic} 自动追加 {@code deleted = 0}）。
+     * 这里不过滤 {@code status}：分类下架后，其子分类仍应参与商品筛选的祖先关系计算。
+     */
+    private Map<Long, List<Long>> loadCategoryChildrenMap() {
+        List<ProductCategory> all = categoryMapper.selectList(
+                new LambdaQueryWrapper<ProductCategory>()
+                        .select(ProductCategory::getId, ProductCategory::getParentId));
+        return all.stream()
+                // parentId 为 null 时按根分类（0）归组：Collectors.groupingBy 的分组函数返回 null 会直接抛 NPE
+                .collect(Collectors.groupingBy(
+                        category -> category.getParentId() == null ? 0L : category.getParentId(),
+                        Collectors.mapping(ProductCategory::getId, Collectors.toList())));
     }
 
     private ProductSpu requireSpu(Long id) {
